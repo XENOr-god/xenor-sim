@@ -1,19 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use xenor_core::core::percolation::{units, Amount, Graph, PropagationStop};
+use xenor_core::core::percolation::{Amount, Graph, units};
 
 fn main() {
-    // ===== Build graph =====
-    // 1 -> 2 (0.7), 1 -> 3 (0.3)
-    // 2 -> 4 (1.0)
-    // 3 -> 4 (0.5), 3 -> 5 (0.5)
-    //
-    // Inflow:
-    // 1: 0.0
-    // 2: 0.7
-    // 3: 0.3
-    // 4: 1.5 (1.0 from 2 + 0.5 from 3)
-    // 5: 0.5
-
+    // ===== Graph =====
     let mut g = Graph::default();
     g.add_edge(1, 2, 0.7).unwrap();
     g.add_edge(1, 3, 0.3).unwrap();
@@ -21,110 +10,129 @@ fn main() {
     g.add_edge(3, 4, 0.5).unwrap();
     g.add_edge(3, 5, 0.5).unwrap();
 
-    // ===== Activation config =====
-    // threshold 0.5 => active nodes: 2,4,5 (3 is inactive because inflow=0.3)
-    let threshold = 0.5;
-    let max_iters = 100;
+    // ===== Dynamic activation threshold (reward inflow-based) =====
+    // Contoh: node akan aktif kalau menerima >= 20 token dalam 1 round.
+    let threshold_reward: Amount = units(20.0);
 
-    // initial active seed (bebas): biasanya sumber reward dimasukkan biar "starting set"
-    let mut initial_active: HashSet<u64> = HashSet::new();
-    initial_active.insert(1);
+    // ===== Initial inflow (round 0) =====
+    // Anggap initial rewards itu inflow pertama.
+    let mut balances: HashMap<u64, Amount> = HashMap::new();
+    balances.insert(1, units(100.0));
 
-    let prop = g.propagate_until_stable(initial_active, threshold, max_iters);
-    println!("=== XENOR-SIM: activation + gated reward propagation ===");
-    println!("threshold: {threshold}");
-    println!("active rounds (propagate): {}", prop.rounds);
-    println!(
-        "active stop: {}",
-        match prop.stop {
-            PropagationStop::Stable => "Stable",
-            PropagationStop::ReachedMaxIters => "ReachedMaxIters",
-        }
-    );
+    let mut inflow: HashMap<u64, Amount> = balances.clone(); // inflow round 0 = initial rewards
+    let mut active: HashSet<u64> = active_from_inflow(&inflow, threshold_reward);
 
-    let mut active_list: Vec<u64> = prop.active.iter().copied().collect();
-    active_list.sort_unstable();
-    println!("Active nodes: {:?}", active_list);
+    println!("=== XENOR-SIM: dynamic activation by reward inflow ===");
+    println!("threshold_reward: {}", fmt_amount(threshold_reward));
+    println!("Initial total: {}", fmt_amount(sum_map(&balances)));
 
-    // ===== Initial rewards =====
-    let mut current: HashMap<u64, Amount> = HashMap::new();
-    current.insert(1, units(100.0));
-
-    println!("\nInitial total: {}", fmt_amount(sum_map(&current)));
-
-    // ===== Reward propagation (gated by active-set) =====
     let max_rounds = 50;
+
     for r in 1..=max_rounds {
-        let before = sum_map(&current);
+        println!("\n--- Round {r} ---");
+        println!(
+            "Active (based on previous inflow): {:?}",
+            sorted_set(&active)
+        );
 
-        // distribute ONLY from active nodes; others "park" their balance
-        let next = distribute_rewards_gated(&g, &current, &prop.active);
+        // split balances:
+        // - active nodes can send their ENTIRE balance
+        // - inactive nodes keep their balance parked
+        let (send_map, parked_map) = split_by_active(&balances, &active);
 
-        let after = sum_map(&next);
+        // distribute ONLY from active senders
+        let ledger = g.distribute_rewards(&send_map);
 
-        println!("\n--- Reward Round {r} ---");
+        // reward inflow for this round = ledger result (what nodes receive)
+        inflow = ledger.balances.clone();
+
+        // next balances = parked + inflow received
+        let mut next_balances = parked_map;
+        for (node, amt) in ledger.balances {
+            *next_balances.entry(node).or_insert(0) += amt;
+        }
+
+        let before = sum_map(&balances);
+        let after = sum_map(&next_balances);
+
         println!("Total before: {}", fmt_amount(before));
         println!("Total after : {}", fmt_amount(after));
-        println!("Conserved?  : {}", if before == after { "YES" } else { "NO" });
+        println!(
+            "Conserved?  : {}",
+            if before == after { "YES" } else { "NO" }
+        );
 
-        print_balances(&next);
+        println!("Inflow this round:");
+        print_balances(&inflow);
 
-        if next == current {
-            println!("\nReward stable reached at round {r} ✅");
+        println!("Balances after merge (parked + inflow):");
+        print_balances(&next_balances);
+
+        // compute active set for next round based on THIS round inflow
+        let next_active = active_from_inflow(&inflow, threshold_reward);
+
+        // stop when balances stop changing AND active-set also stable
+        if next_balances == balances && next_active == active {
+            println!("\nStable reached at round {r} ✅");
             break;
         }
 
-        current = next;
+        balances = next_balances;
+        active = next_active;
     }
 
     println!("\n=== Done ===");
 }
 
-/// Gated reward distribution:
-/// - kalau node TIDAK aktif => reward tetap di node itu (tidak mengalir)
-/// - kalau node aktif => reward didistribusikan pakai xenor-core (konservatif)
-fn distribute_rewards_gated(
-    g: &Graph,
-    current: &HashMap<u64, Amount>,
-    active: &HashSet<u64>,
-) -> HashMap<u64, Amount> {
-    let mut gated_input: HashMap<u64, Amount> = HashMap::new();
-    let mut parked: HashMap<u64, Amount> = HashMap::new();
+fn active_from_inflow(inflow: &HashMap<u64, Amount>, threshold: Amount) -> HashSet<u64> {
+    inflow
+        .iter()
+        .filter_map(|(&node, &amt)| if amt >= threshold { Some(node) } else { None })
+        .collect()
+}
 
-    // split: active -> boleh mengalir; inactive -> park
-    for (&node, &amt) in current.iter() {
+fn split_by_active(
+    balances: &HashMap<u64, Amount>,
+    active: &HashSet<u64>,
+) -> (HashMap<u64, Amount>, HashMap<u64, Amount>) {
+    let mut send = HashMap::new();
+    let mut parked = HashMap::new();
+
+    for (&node, &amt) in balances {
         if amt == 0 {
             continue;
         }
         if active.contains(&node) {
-            gated_input.insert(node, amt);
+            send.insert(node, amt);
         } else {
-            *parked.entry(node).or_insert(0) += amt;
+            parked.insert(node, amt);
         }
     }
 
-    // distribute from active nodes only
-    let ledger = g.distribute_rewards(&gated_input);
-
-    // merge parked + distributed
-    let mut next = ledger.balances;
-    for (node, amt) in parked {
-        *next.entry(node).or_insert(0) += amt;
-    }
-
-    next
+    (send, parked)
 }
 
 fn sum_map(m: &HashMap<u64, Amount>) -> Amount {
     m.values().copied().sum()
 }
 
+fn sorted_set(s: &HashSet<u64>) -> Vec<u64> {
+    let mut v: Vec<u64> = s.iter().copied().collect();
+    v.sort_unstable();
+    v
+}
+
 fn print_balances(balances: &HashMap<u64, Amount>) {
     let mut entries: Vec<(u64, Amount)> = balances.iter().map(|(&k, &v)| (k, v)).collect();
     entries.sort_by_key(|(k, _)| *k);
 
+    if entries.is_empty() {
+        println!("(empty)");
+        return;
+    }
+
     for (node, amt) in entries {
-        println!("node {node}: {}", fmt_amount(amt));
+        println!("  node {node}: {}", fmt_amount(amt));
     }
 }
 
