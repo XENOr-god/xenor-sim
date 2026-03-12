@@ -1,17 +1,33 @@
-# xenor-sim
+# XENØr Sim
 
-Simulation playground for XENØr systems.
+Simulation and modeling environment for XENØr.
 
-## Purpose
+This repository contains the simulation layer for XENØr, designed to evaluate mechanism behavior, system dynamics, and incentive outcomes before production decisions are made.
 
-This repository is used to run small Rust simulations on top of `xenor-core` and test deterministic behavior, propagation, and incentive flow assumptions before moving ideas into more formal implementations.
+## Focus
 
-## Relationship to xenor-core
+The simulation repository is intended to support:
 
-- `xenor-core`: reusable engine / primitives
-- `xenor-sim`: executable sandbox and experiment runner
+- mechanism modeling
+- behavioral testing
+- incentive analysis
+- scenario evaluation
+- pre-deployment decision support
 
-## Quick start
+## Design Principles
 
-```bash
-cargo run
+- simulation before deployment
+- explicit system assumptions
+- measurable mechanism behavior
+- deterministic and reviewable outputs
+- research-informed iteration
+
+## Related Repositories
+
+- **xenor-core** — core protocol and systems work
+- **xenor-site** — public-facing site and ecosystem surface
+- **xenor-sale** — archived early sale experiment, kept for reference only
+
+## Status
+
+Active simulation and modeling repository for the XENØr project.
