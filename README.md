@@ -8,7 +8,8 @@ into public claims or broader integrations.
 ## Status
 
 Active, experimental validation repository. This repo is useful today, but it
-is still research-stage and is not yet versioned as a stable public release.
+is still research-stage and is not yet versioned as a stable public release
+surface.
 
 ## Why This Repo Exists
 
@@ -57,6 +58,11 @@ cargo run
 - [`xenor-sale`](https://github.com/XENOr-god/xenor-sale) — archived
   historical sale prototype
 
+## Contributing
+
+No standalone contributing guide is currently published in this repository.
+Use issues or pull requests directly for scenario and validation fixes.
+
 ## License
 
-This repository does not currently publish a separate license file.
+No standalone license file is currently published in this repository.
